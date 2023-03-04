@@ -12,3 +12,4 @@
 ### 参考了
 - [我的 Android 重构之旅：动态下发 SO 库（上）](https://www.jianshu.com/p/260137fdf7c5)
 - [货拉拉 Android 动态资源管理系统原理与实践](https://juejin.cn/post/7113703128733581342)
+- [Android动态加载so！这一篇就够了！](https://juejin.cn/post/7107958280097366030)
