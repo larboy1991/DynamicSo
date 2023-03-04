@@ -17,10 +17,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         val btn = findViewById<Button>(R.id.mBtn1)
         val btn2 = findViewById<Button>(R.id.mBtn2)
-
-        Log.d("zhuanghz", "onCreate: $classLoader")
-
-
         // 解析对应文件进行下的md5和版本号是否一致，这边假设一致，那么接下来就是如何去加载so库实现了
         btn.setOnClickListener {
             AssetsUtils.copyAssetFileToInternalStorage(this)
