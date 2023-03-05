@@ -1,11 +1,8 @@
 import groovy.json.JsonSlurper
 import groovy.json.JsonBuilder
 import groovy.json.StringEscapeUtils
-
-import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
-import java.util.concurrent.TimeUnit
 import java.util.zip.CRC32
 import java.util.zip.CheckedOutputStream
 import java.util.zip.ZipEntry
@@ -33,11 +30,11 @@ gradle.taskGraph.afterTask {
         ArrayList<SoInfo.SoInfoItem> newList = new ArrayList<SoInfo.SoInfoItem>()
         newList.clear()
         SoInfo oldSoInfo = parseSoJsonFile()
-        String abi = getAbiFilters()
+        String abi = project.android.defaultConfig.ndk.abiFilters.toString().replaceAll("\\[", "").replaceAll("]", "")
         String buildType = toLowerCaseFirstOne(taskName.replaceAll("merge", "").replaceAll("NativeLibs", ""))
 
         // 获取在编译期间临时存放so库的路径
-        String soPath = getMergedNativeLibsDirPath(abi, buildType)
+        String soPath = appDirPath + "/build/intermediates/merged_native_libs/$buildType/out/lib/$abi"
         // 获取文件目录下的所有so，并解析出对应的信息
         File dirFile = new File(soPath)
         if (!dirFile.exists()) {
@@ -83,23 +80,8 @@ gradle.taskGraph.afterTask {
  * @param name
  * @return
  */
-boolean isMergeNativeLibs(String name) {
+static boolean isMergeNativeLibs(String name) {
     return name.contains("merge") && name.contains("NativeLibs")
-}
-
-/**
- * 获取abi列表
- */
-String getAbiFilters() {
-    return project.android.defaultConfig.ndk.abiFilters.toString().replaceAll("\\[", "").replaceAll("]", "")
-}
-
-/**
- * 获取合并后的对应架构和渠道的so目录位置
- * @param abi 对应abi
- */
-String getMergedNativeLibsDirPath(String abi, String buildType) {
-    return appDirPath + "/build/intermediates/merged_native_libs/$buildType/out/lib/$abi"
 }
 
 /**
@@ -119,7 +101,7 @@ SoInfo.SoInfoItem parseSoInfo(File file) {
  * @param file
  * @return
  */
-String getFileMd5(File file) {
+static String getFileMd5(File file) {
     MessageDigest md = null
     try {
         md = MessageDigest.getInstance("MD5")
@@ -223,7 +205,7 @@ void writeJsonToAssets(List<SoInfo.SoInfoItem> list, String abi, String dirName)
             from assetsFile
             into tmpCompressedAssetsDir
         }
-        compress(tmpCompressedAssetsDir.toString(), zipFile.toString())
+        ZipUtils.compress(tmpCompressedAssetsDir.toString(), zipFile.toString())
         tmpCompressedAssetsDir.deleteDir()
     }
 }
@@ -255,7 +237,7 @@ String getAppDirPath() {
  * @param s
  * @return
  */
-String toUppercaseFirstOne(String s) {
+static String toUppercaseFirstOne(String s) {
     if (Character.isUpperCase(s.charAt(0)))
         return s
     else
@@ -267,94 +249,11 @@ String toUppercaseFirstOne(String s) {
  * @param s
  * @return
  */
-String toLowerCaseFirstOne(String s) {
+static String toLowerCaseFirstOne(String s) {
     if (Character.isLowerCase(s.charAt(0)))
         return s
     else
         return (new StringBuilder()).append(Character.toLowerCase(s.charAt(0))).append(s.substring(1)).toString()
-}
-
-
-/**
- * 将文件压缩导指定位置
- * @param srcPath 被压缩的目录/文件
- * @param dstPath 想要生成的压缩文件
- */
-void compress(String srcPath, String dstPath) throws IOException {
-    File srcFile = new File(srcPath)
-    File dstFile = new File(dstPath)
-    if (!srcFile.exists()) {
-        throw new FileNotFoundException(srcPath + "不存在！")
-    }
-
-    FileOutputStream out = null
-    ZipOutputStream zipOut = null
-    try {
-        out = new FileOutputStream(dstFile)
-        CheckedOutputStream cos = new CheckedOutputStream(out, new CRC32())
-        zipOut = new ZipOutputStream(cos)
-        String baseDir = ""
-        compress(srcFile, zipOut, baseDir)
-    }
-    finally {
-        if (null != zipOut) {
-            zipOut.close()
-            out = null
-        }
-
-        if (null != out) {
-            out.close()
-        }
-    }
-}
-
-/**
- * 压缩文件或者文件夹
- */
-void compress(File file, ZipOutputStream zipOut, String baseDir) throws IOException {
-    if (file.isDirectory()) {
-        compressDirectory(file, zipOut, baseDir)
-    } else {
-        compressFile(file, zipOut, baseDir)
-    }
-}
-
-/**
- * 压缩目录
- */
-void compressDirectory(File dir, ZipOutputStream zipOut, String baseDir) throws IOException {
-    File[] files = dir.listFiles()
-    for (int i = 0; i < files.length; i++) {
-        compress(files[i], zipOut, baseDir + dir.getName() + "/")
-    }
-}
-
-/**
- * 单独压缩文件1
- */
-void compressFile(File file, ZipOutputStream zipOut, String baseDir) throws IOException {
-    if (!file.exists()) {
-        return
-    }
-    BufferedInputStream bis = null
-    try {
-        bis = new BufferedInputStream(new FileInputStream(file))
-        ZipEntry entry = new ZipEntry(baseDir + file.getName())
-        // 修改时间保证 zip 的 md5 不会发生变化
-        entry.setTime(0)
-        entry.setLastAccessTime(FileTime.from(0, TimeUnit.MILLISECONDS))
-        entry.setLastModifiedTime(FileTime.from(0, TimeUnit.MILLISECONDS))
-        zipOut.putNextEntry(entry)
-        int count
-        byte[] data = new byte[8192]
-        while ((count = bis.read(data, 0, 8192)) != -1) {
-            zipOut.write(data, 0, count)
-        }
-    } finally {
-        if (null != bis) {
-            bis.close()
-        }
-    }
 }
 
 // so信息格式
@@ -372,5 +271,108 @@ class SoInfo {
     }
 }
 
+/**
+ * 压缩工具类
+ */
+class ZipUtils {
 
+    static final int BUFFER = 8192
+
+    /**
+     * 压缩
+     *
+     * @param srcPath 待压缩路径
+     * @param dstPath 压缩输出路径
+     * @throws IOException
+     */
+    static void compress(String srcPath, String dstPath) throws IOException {
+        File srcFile = new File(srcPath)
+        File dstFile = new File(dstPath)
+        if (!srcFile.exists()) {
+            throw new FileNotFoundException(srcPath + "不存在！")
+        }
+        FileOutputStream out = null
+        ZipOutputStream zipOut = null
+        try {
+            out = new FileOutputStream(dstFile)
+            CheckedOutputStream cos = new CheckedOutputStream(out, new CRC32())
+            zipOut = new ZipOutputStream(cos)
+            String baseDir = ""
+            compress(srcFile, zipOut, baseDir)
+        } finally {
+            if (null != zipOut) {
+                zipOut.close()
+                out = null
+            }
+
+            if (null != out) {
+                out.close()
+            }
+        }
+    }
+
+    /**
+     * 压缩
+     *
+     * @param file 待压缩File对象
+     * @param zipOut ZipOutputStream对象
+     * @param baseDir 压缩基础路径
+     * @throws IOException
+     */
+    static void compress(File file, ZipOutputStream zipOut, String baseDir) throws IOException {
+        if (file.isDirectory()) {
+            compressDirectory(file, zipOut, baseDir)
+        } else {
+            compressFile(file, zipOut, baseDir)
+        }
+    }
+
+
+    /**
+     * 压缩目录
+     *
+     * @param dir 待压缩目录路径
+     * @param zipOut ZipOutputStream对象
+     * @param baseDir 压缩基础路径
+     * @throws IOException
+     */
+    static void compressDirectory(File dir, ZipOutputStream zipOut, String baseDir) throws IOException {
+        File[] files = dir.listFiles()
+        for (int i = 0; i < files.length; i++) {
+            compress(files[i], zipOut, baseDir + dir.getName() + "/")
+        }
+    }
+
+
+    /**
+     * 压缩文件
+     *
+     * @param file 待压缩File对象
+     * @param zipOut ZipOutputStream对象
+     * @param baseDir 压缩基础路径
+     * @throws IOException
+     */
+    static void compressFile(File file, ZipOutputStream zipOut, String baseDir) throws IOException {
+        if (!file.exists()) {
+            return
+        }
+        BufferedInputStream bis = null
+        try {
+            bis = new BufferedInputStream(new FileInputStream(file))
+            ZipEntry entry = new ZipEntry(baseDir + file.getName())
+            zipOut.putNextEntry(entry)
+            int count
+            byte[] data = new byte[BUFFER]
+            while ((count = bis.read(data, 0, BUFFER)) != -1) {
+                zipOut.write(data, 0, count)
+            }
+
+        } finally {
+            if (null != bis) {
+                bis.close()
+            }
+        }
+    }
+
+}
 

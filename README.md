@@ -8,6 +8,7 @@
 - 4、使用droidassist替换`System.loadLibrary()`方法，防止当前的so库不存在时出现崩溃，替换的方法使用的是relinker库里面的
 - 5、启动后，使用Think方案通过反射将指定so库的目录加入到DexPathList的nativeLibraryPathElements里面去
 - 6、第5步完成后，就可以执行native的方法了
+- 7、**注意：** 编译前需要先clean一下，因为如果编译时出现增量编译就不会再次生成so库，然后会因为app/build/intermediates/merged_native_libs/debug/out/lib/arm64-v8a 目录下没有so文件导致生成的json文件出错
 
 ### 参考了
 - [我的 Android 重构之旅：动态下发 SO 库（上）](https://www.jianshu.com/p/260137fdf7c5)
